@@ -19,7 +19,7 @@ import {
   Zap,
 } from "lucide-react";
 
-const steps = ["首页", "目标", "照片", "授权", "生成", "报告"];
+const steps = ["首页", "目标", "真人照片", "授权", "生成", "报告"];
 
 const socialGoals = [
   "提升异性吸引力",
@@ -92,6 +92,79 @@ const fallbackReport = {
   conclusion: "你现在最需要的不是学习一堆穿搭术语，而是让外在信号更清晰：你想吸引谁，就让发型、衣服、细节都朝同一个方向说话。",
 };
 
+
+function isPlainObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value);
+}
+
+function ensureObj(value, fallback = {}) {
+  return isPlainObject(value) ? value : fallback;
+}
+
+function toText(value, fallback = "") {
+  if (value === null || value === undefined || value === "") return fallback;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.map((v) => toText(v)).filter(Boolean).join("；");
+  if (isPlainObject(value)) return Object.values(value).map((v) => toText(v)).filter(Boolean).join("；");
+  return fallback;
+}
+
+function toArray(value) {
+  if (value === null || value === undefined || value === "") return [];
+  if (Array.isArray(value)) return value.flatMap((v) => toArray(v)).filter(Boolean);
+  if (typeof value === "string") {
+    return value
+      .split(/[\n；;]/)
+      .map((x) => x.replace(/^[-•\d.、\s]+/, "").trim())
+      .filter(Boolean);
+  }
+  if (isPlainObject(value)) return Object.values(value).flatMap((v) => toArray(v)).filter(Boolean);
+  return [String(value)];
+}
+
+function normalizePriority(value) {
+  const arr = Array.isArray(value) ? value : value ? [value] : [];
+  return arr.slice(0, 3).map((item, index) => {
+    if (isPlainObject(item)) {
+      return {
+        signal: toText(item.signal, `第${index + 1}个吸引力信号`),
+        evidence: toText(item.evidence, "暂无明确照片依据"),
+        action: toText(item.action, "先补充更清晰照片或做低成本调整"),
+        why: toText(item.why, "有助于让外在信号更清晰"),
+      };
+    }
+    return { signal: toText(item, `第${index + 1}个吸引力信号`), evidence: "", action: "", why: "" };
+  });
+}
+
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, message: "" };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, message: String(error?.message || error) };
+  }
+  componentDidCatch(error, info) {
+    console.error("[ui] render crashed", error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-[#f6f6f4] p-5 text-zinc-950">
+          <div className="mx-auto max-w-md rounded-3xl bg-white p-6 shadow-sm">
+            <h2 className="text-xl font-black">报告展示出错</h2>
+            <p className="mt-3 text-sm leading-7 text-zinc-600">AI 返回的数据结构不稳定，页面已经拦截白屏。请重新生成一次，或把这段错误发给开发者。</p>
+            <pre className="mt-4 overflow-auto rounded-2xl bg-zinc-100 p-3 text-xs text-red-600">{this.state.message}</pre>
+            <button onClick={() => window.location.reload()} className="mt-5 w-full rounded-2xl bg-black px-5 py-4 font-semibold text-white">刷新重试</button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function Pill({ children, active, onClick }) {
   return (
     <button type="button" onClick={onClick} className={`rounded-full border px-4 py-2 text-sm transition ${active ? "border-black bg-black text-white shadow-sm" : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400"}`}>
@@ -159,22 +232,26 @@ function UploadBox({ label, helper, photo, onChange }) {
 
 function ErrorBox({ error }) {
   if (!error) return null;
-  return <div className="rounded-3xl border border-red-200 bg-red-50 p-4 text-sm leading-6 text-red-700">{error}</div>;
+  return <div className="rounded-3xl border border-red-200 bg-red-50 p-4 text-sm leading-7 text-red-700">{error}</div>;
 }
 
 function TextList({ items }) {
-  return <ul className="list-inside list-disc space-y-1">{(items || []).map((item, i) => <li key={i}>{item}</li>)}</ul>;
+  const list = toArray(items);
+  if (!list.length) return <p className="text-zinc-500">暂无明确判断</p>;
+  return <ul className="list-inside list-disc space-y-1">{list.map((item, i) => <li key={i}>{item}</li>)}</ul>;
 }
 
 function ReportView({ report }) {
-  const r = report?.rawText ? fallbackReport : { ...fallbackReport, ...(report || {}) };
-  const scores = { ...fallbackReport.scores, ...(r.scores || {}) };
-  const snapshot = { ...fallbackReport.snapshot, ...(r.snapshot || {}) };
-  const currentSignal = { ...fallbackReport.currentSignal, ...(r.currentSignal || {}) };
-  const targetMatch = { ...fallbackReport.targetMatch, ...(r.targetMatch || {}) };
-  const route = { ...fallbackReport.route, ...(r.route || {}) };
-  const actionPlan = { ...fallbackReport.actionPlan, ...(r.actionPlan || {}) };
-  const dateFormula = { ...fallbackReport.dateFormula, ...(r.dateFormula || {}) };
+  const r = report?.rawText ? fallbackReport : { ...fallbackReport, ...ensureObj(report, {}) };
+  const scores = { ...fallbackReport.scores, ...ensureObj(r.scores, {}) };
+  const snapshot = { ...fallbackReport.snapshot, ...ensureObj(r.snapshot, {}) };
+  const currentSignal = { ...fallbackReport.currentSignal, ...ensureObj(r.currentSignal, {}) };
+  const targetMatch = { ...fallbackReport.targetMatch, ...ensureObj(r.targetMatch, {}) };
+  const route = { ...fallbackReport.route, ...ensureObj(r.route, {}) };
+  const actionPlan = { ...fallbackReport.actionPlan, ...ensureObj(r.actionPlan, {}) };
+  const dateFormula = { ...fallbackReport.dateFormula, ...ensureObj(r.dateFormula, {}) };
+  const priority = normalizePriority(r.priority || fallbackReport.priority);
+  const plan7 = toArray(r.plan7 || fallbackReport.plan7);
 
   return (
     <div className="space-y-5">
@@ -188,9 +265,9 @@ function ReportView({ report }) {
           <div className="rounded-full bg-black px-3 py-1 text-xs text-white">真实生成</div>
         </div>
         <div className="grid grid-cols-3 gap-2">
-          <div className="rounded-2xl bg-zinc-50 p-3 text-center"><div className="text-xl font-black">{scores.attraction || 68}</div><div className="text-xs text-zinc-500">恋爱感指数</div></div>
-          <div className="rounded-2xl bg-zinc-50 p-3 text-center"><div className="text-xl font-black">{scores.match || 62}</div><div className="text-xs text-zinc-500">目标匹配度</div></div>
-          <div className="rounded-2xl bg-zinc-50 p-3 text-center"><div className="text-xl font-black">{scores.keyword || "待校准"}</div><div className="text-xs text-zinc-500">核心信号</div></div>
+          <div className="rounded-2xl bg-zinc-50 p-3 text-center"><div className="text-xl font-black">{toText(scores.attraction, 68)}</div><div className="text-xs text-zinc-500">恋爱感指数</div></div>
+          <div className="rounded-2xl bg-zinc-50 p-3 text-center"><div className="text-xl font-black">{toText(scores.match, 62)}</div><div className="text-xs text-zinc-500">目标匹配度</div></div>
+          <div className="rounded-2xl bg-zinc-50 p-3 text-center"><div className="text-xl font-black">{toText(scores.keyword, "待校准")}</div><div className="text-xs text-zinc-500">核心信号</div></div>
         </div>
       </div>
 
@@ -202,20 +279,20 @@ function ReportView({ report }) {
       </SectionCard>
 
       <SectionCard icon={Heart} title="二、你当前释放的约会信号">
-        <p>{currentSignal.summary}</p>
+        <p>{toText(currentSignal.summary)}</p>
         <div className="mt-3 rounded-2xl bg-zinc-50 p-4"><b>更容易吸引：</b><TextList items={currentSignal.easyToAttract} /></div>
         <div className="mt-3 rounded-2xl bg-zinc-50 p-4"><b>目前较难吸引：</b><TextList items={currentSignal.weakWith} /></div>
       </SectionCard>
 
       <SectionCard icon={Zap} title="三、你想吸引的人，当前会不会被你吸引？">
-        <p><b>目标对象：</b>{targetMatch.targetLabel}</p>
-        <p><b>当前匹配：</b>{targetMatch.matchLevel}</p>
+        <p><b>目标对象：</b>{toText(targetMatch.targetLabel)}</p>
+        <p><b>当前匹配：</b>{toText(targetMatch.matchLevel)}</p>
         <div className="mt-3"><b>主要差距：</b><TextList items={targetMatch.gap} /></div>
       </SectionCard>
 
       <SectionCard icon={Sparkles} title="四、你的主路线，不给三个水风格">
-        <p><b>主路线：</b>{route.name}</p>
-        <p><b>关键词：</b>{(route.keywords || []).join(" / ")}</p>
+        <p><b>主路线：</b>{toText(route.name)}</p>
+        <p><b>关键词：</b>{toArray(route.keywords).join(" / ") || "待校准"}</p>
         <div className="mt-3 grid gap-3">
           <div className="rounded-2xl bg-zinc-50 p-4"><b>保留：</b><TextList items={route.keep} /></div>
           <div className="rounded-2xl bg-zinc-50 p-4"><b>去掉：</b><TextList items={route.remove} /></div>
@@ -225,28 +302,28 @@ function ReportView({ report }) {
 
       <SectionCard icon={CheckCircle2} title="五、最该先改的 3 个吸引力信号">
         <div className="space-y-3">
-          {(r.priority || []).map((p, i) => <div key={i} className="rounded-2xl bg-zinc-50 p-4"><b>{i + 1}. {p.signal}</b><p className="mt-1"><span className="text-zinc-500">依据：</span>{p.evidence}</p><p><span className="text-zinc-500">动作：</span>{p.action}</p><p><span className="text-zinc-500">为什么有效：</span>{p.why}</p></div>)}
+          {priority.map((p, i) => <div key={i} className="rounded-2xl bg-zinc-50 p-4"><b>{i + 1}. {toText(p.signal)}</b><p className="mt-1"><span className="text-zinc-500">依据：</span>{toText(p.evidence)}</p><p><span className="text-zinc-500">动作：</span>{toText(p.action)}</p><p><span className="text-zinc-500">为什么有效：</span>{toText(p.why)}</p></div>)}
         </div>
       </SectionCard>
 
       <SectionCard icon={Scissors} title="六、发型/穿搭/细节怎么改">
-        <p><b>发型：</b>{actionPlan.hair}</p>
-        <p><b>穿搭：</b>{actionPlan.outfit}</p>
-        <p><b>细节：</b>{actionPlan.detail}</p>
-        <p><b>不要做：</b>{actionPlan.dontDo}</p>
+        <p><b>发型：</b>{toText(actionPlan.hair)}</p>
+        <p><b>穿搭：</b>{toText(actionPlan.outfit)}</p>
+        <p><b>细节：</b>{toText(actionPlan.detail)}</p>
+        <p><b>不要做：</b>{toText(actionPlan.dontDo)}</p>
       </SectionCard>
 
       <SectionCard icon={Shirt} title="七、社交场景可执行公式">
-        <p><b>主形象：</b>{dateFormula.mainLook}</p>
-        <p><b>公式：</b>{dateFormula.formula}</p>
-        <p><b>原因：</b>{dateFormula.why}</p>
+        <p><b>主形象：</b>{toText(dateFormula.mainLook)}</p>
+        <p><b>公式：</b>{toText(dateFormula.formula)}</p>
+        <p><b>原因：</b>{toText(dateFormula.why)}</p>
       </SectionCard>
 
       <SectionCard icon={RefreshCw} title="八、7天吸引力调整计划">
-        <ol className="list-inside list-decimal space-y-1">{(r.plan7 || []).map((item, i) => <li key={i}>{item}</li>)}</ol>
+        <ol className="list-inside list-decimal space-y-1">{plan7.map((item, i) => <li key={i}>{item}</li>)}</ol>
       </SectionCard>
 
-      <SectionCard icon={CheckCircle2} title="九、总结">{r.conclusion}</SectionCard>
+      <SectionCard icon={CheckCircle2} title="九、总结">{toText(r.conclusion)}</SectionCard>
     </div>
   );
 }
@@ -284,7 +361,12 @@ export default function AIDateAttractionCoachApp() {
       const text = await res.text();
       let data;
       try { data = JSON.parse(text); } catch { throw new Error(`接口返回了非 JSON 内容：${text.slice(0, 180)}`); }
-      if (!res.ok) throw new Error(data.error || data.detail || "报告生成失败");
+      if (!res.ok) {
+        const message = data?.code === "INVALID_USER_PHOTOS"
+          ? data.error || "照片不符合要求：请上传本人正脸、半身、全身照片，不要上传商品图/物品图。"
+          : data.error || data.detail || "报告生成失败";
+        throw new Error(message);
+      }
       setReport(data.report || fallbackReport); setPage(5);
     } catch (err) { setError(String(err.message || err)); } finally { setLoading(false); }
   }
@@ -292,6 +374,7 @@ export default function AIDateAttractionCoachApp() {
   const resetAll = () => { setPage(0); setReport(null); setError(""); setFeedback(0); setNote(""); };
 
   return (
+    <ErrorBoundary>
     <div className="min-h-screen bg-[#f6f6f4] text-zinc-950">
       {page > 0 && <Progress current={progressIndex} />}
       <main className="mx-auto max-w-md px-4 py-6">
@@ -301,7 +384,7 @@ export default function AIDateAttractionCoachApp() {
           <div className="overflow-hidden rounded-[32px] bg-black p-6 text-white shadow-xl">
             <div className="mb-8 flex items-center justify-between"><div className="flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs"><Heart size={14} /> AI约会吸引力顾问</div><div className="rounded-full bg-white/10 px-3 py-1 text-xs">V0.5</div></div>
             <h1 className="text-4xl font-black leading-tight tracking-tight">你现在会吸引谁？又该怎么吸引你想吸引的人？</h1>
-            <p className="mt-4 text-sm leading-7 text-zinc-300">上传照片，AI 分析你当前释放的约会信号、目标对象匹配度，以及发型/穿搭/细节该怎么调整。不是穿搭顾问，是恋爱形象教练。</p>
+            <p className="mt-4 text-sm leading-7 text-zinc-300">上传真人照片，AI 分析你当前释放的约会信号、目标对象匹配度，以及发型/穿搭/细节该怎么调整。不是穿搭顾问，是恋爱形象教练。</p>
             <button onClick={() => setPage(1)} className="mt-8 flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-5 py-4 font-semibold text-black">开始吸引力诊断 <ChevronRight size={18} /></button>
           </div>
           <div className="grid grid-cols-3 gap-3"><div className="rounded-3xl bg-white p-4 shadow-sm"><Target size={22} /><p className="mt-3 text-sm font-semibold">目标对象</p><p className="mt-1 text-xs text-zinc-500">想吸引谁</p></div><div className="rounded-3xl bg-white p-4 shadow-sm"><Zap size={22} /><p className="mt-3 text-sm font-semibold">吸引力信号</p><p className="mt-1 text-xs text-zinc-500">别人怎么看你</p></div><div className="rounded-3xl bg-white p-4 shadow-sm"><Sparkles size={22} /><p className="mt-3 text-sm font-semibold">改造路径</p><p className="mt-1 text-xs text-zinc-500">怎么变更有感觉</p></div></div>
@@ -316,17 +399,18 @@ export default function AIDateAttractionCoachApp() {
           <SectionCard icon={MessageCircle} title="你现在最卡的问题，最多选2个"><div className="flex flex-wrap gap-2">{painPoints.map((item) => <Pill key={item} active={selectedPainPoints.includes(item)} onClick={() => setSelectedPainPoints((prev) => prev.includes(item) ? prev.filter((x) => x !== item) : prev.length >= 2 ? [prev[1], item] : [...prev, item])}>{item}</Pill>)}</div></SectionCard>
           <SectionCard icon={RefreshCw} title="你能接受多大改变？"><div className="flex flex-wrap gap-2">{changeLevels.map((item) => <Pill key={item} active={profile.changeLevel === item} onClick={() => updateProfile("changeLevel", item)}>{item}</Pill>)}</div></SectionCard>
           <SectionCard icon={Sparkles} title="主要使用场景"><div className="flex flex-wrap gap-2">{contexts.map((item) => <Pill key={item} active={profile.context === item} onClick={() => updateProfile("context", item)}>{item}</Pill>)}</div></SectionCard>
-          <button onClick={() => setPage(2)} className="flex w-full items-center justify-center gap-2 rounded-2xl bg-black px-5 py-4 font-semibold text-white">下一步：上传照片 <ChevronRight size={18} /></button>
+          <button onClick={() => setPage(2)} className="flex w-full items-center justify-center gap-2 rounded-2xl bg-black px-5 py-4 font-semibold text-white">下一步：上传真人照片 <ChevronRight size={18} /></button>
         </div>}
 
-        {page === 2 && <div className="space-y-5"><div><h2 className="text-2xl font-black">上传 3 张照片</h2><p className="mt-2 text-sm text-zinc-500">越真实越好。AI 会看你当前释放的吸引力信号，不是给颜值打分。</p></div><UploadBox label="正脸照" helper="看脸型、发型、第一印象" photo={photos.front} onChange={(img) => setPhotos({ ...photos, front: img })} /><UploadBox label="半身照" helper="看上身轮廓、衣服信号" photo={photos.half} onChange={(img) => setPhotos({ ...photos, half: img })} /><UploadBox label="全身照" helper="看比例、鞋服完整度" photo={photos.full} onChange={(img) => setPhotos({ ...photos, full: img })} /><div className="rounded-2xl bg-zinc-100 p-4 text-sm leading-6 text-zinc-600">当前版本不做云端照片存储，只把压缩后的图片发送给 AI 接口生成本次报告。</div><button disabled={!canContinueFromPhotos} onClick={() => setPage(3)} className={`flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-4 font-semibold ${canContinueFromPhotos ? "bg-black text-white" : "bg-zinc-200 text-zinc-400"}`}>下一步：确认授权 <ChevronRight size={18} /></button></div>}
+        {page === 2 && <div className="space-y-5"><div><h2 className="text-2xl font-black">上传 3 张照片</h2><p className="mt-2 text-sm text-zinc-500">越真实越好。AI 会看你当前释放的吸引力信号，不是给颜值打分。</p></div><UploadBox label="本人正脸照" helper="看脸型、发型、第一印象" photo={photos.front} onChange={(img) => setPhotos({ ...photos, front: img })} /><UploadBox label="本人半身照" helper="看上身轮廓、衣服信号" photo={photos.half} onChange={(img) => setPhotos({ ...photos, half: img })} /><UploadBox label="本人全身照" helper="看比例、鞋服完整度" photo={photos.full} onChange={(img) => setPhotos({ ...photos, full: img })} /><div className="rounded-2xl bg-zinc-100 p-4 text-sm leading-6 text-zinc-600">当前版本不做云端照片存储，只把压缩后的图片发送给 AI 接口生成本次报告。</div><button disabled={!canContinueFromPhotos} onClick={() => setPage(3)} className={`flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-4 font-semibold ${canContinueFromPhotos ? "bg-black text-white" : "bg-zinc-200 text-zinc-400"}`}>下一步：确认授权 <ChevronRight size={18} /></button></div>}
 
-        {page === 3 && <div className="space-y-5"><div><h2 className="text-2xl font-black">隐私与授权</h2><p className="mt-2 text-sm text-zinc-500">本次分析授权和训练授权分开选择。</p></div><div className="rounded-3xl bg-white p-5 shadow-sm"><div className="mb-4 flex items-center gap-2"><ShieldCheck size={20} /><h3 className="font-semibold">本次分析授权</h3></div><p className="text-sm leading-7 text-zinc-600">我同意上传照片和填写的信息用于生成本次 AI 约会吸引力诊断报告。照片会发送给已配置的 AI 服务商处理。</p><label className="mt-4 flex items-center gap-3 rounded-2xl bg-zinc-50 p-4 text-sm"><input type="checkbox" checked={agreeAnalysis} onChange={(e) => setAgreeAnalysis(e.target.checked)} />我同意用于本次吸引力诊断</label></div><div className="rounded-3xl bg-white p-5 shadow-sm"><div className="mb-4 flex items-center gap-2"><RefreshCw size={20} /><h3 className="font-semibold">产品优化/模型训练授权</h3></div><p className="text-sm leading-7 text-zinc-600">我自愿同意将照片、问卷信息、AI 诊断结果和反馈用于产品优化、风格判断规则优化和模型训练。</p><label className="mt-4 flex items-center gap-3 rounded-2xl bg-zinc-50 p-4 text-sm"><input type="checkbox" checked={agreeTraining} onChange={(e) => setAgreeTraining(e.target.checked)} />我自愿授权用于产品优化和模型训练</label></div><button disabled={!agreeAnalysis} onClick={generateReport} className={`flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-4 font-semibold ${agreeAnalysis ? "bg-black text-white" : "bg-zinc-200 text-zinc-400"}`}>生成我的吸引力报告 <Sparkles size={18} /></button></div>}
+        {page === 3 && <div className="space-y-5"><div><h2 className="text-2xl font-black">隐私与授权</h2><p className="mt-2 text-sm text-zinc-500">本次分析授权和训练授权分开选择。</p></div><div className="rounded-3xl bg-white p-5 shadow-sm"><div className="mb-4 flex items-center gap-2"><ShieldCheck size={20} /><h3 className="font-semibold">本次分析授权</h3></div><p className="text-sm leading-7 text-zinc-600">我同意上传真人照片和填写的信息用于生成本次 AI 约会吸引力诊断报告。照片会发送给已配置的 AI 服务商处理。</p><label className="mt-4 flex items-center gap-3 rounded-2xl bg-zinc-50 p-4 text-sm"><input type="checkbox" checked={agreeAnalysis} onChange={(e) => setAgreeAnalysis(e.target.checked)} />我同意用于本次吸引力诊断</label></div><div className="rounded-3xl bg-white p-5 shadow-sm"><div className="mb-4 flex items-center gap-2"><RefreshCw size={20} /><h3 className="font-semibold">产品优化/模型训练授权</h3></div><p className="text-sm leading-7 text-zinc-600">我自愿同意将照片、问卷信息、AI 诊断结果和反馈用于产品优化、风格判断规则优化和模型训练。</p><label className="mt-4 flex items-center gap-3 rounded-2xl bg-zinc-50 p-4 text-sm"><input type="checkbox" checked={agreeTraining} onChange={(e) => setAgreeTraining(e.target.checked)} />我自愿授权用于产品优化和模型训练</label></div><button disabled={!agreeAnalysis} onClick={generateReport} className={`flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-4 font-semibold ${agreeAnalysis ? "bg-black text-white" : "bg-zinc-200 text-zinc-400"}`}>生成我的吸引力报告 <Sparkles size={18} /></button></div>}
 
         {page === 4 && <div className="space-y-5 py-12 text-center"><div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-black text-white"><Loader2 className="animate-spin" size={34} /></div><div><h2 className="text-2xl font-black">正在生成吸引力报告</h2><p className="mt-3 text-sm leading-7 text-zinc-500">AI 正在分析照片、目标对象和当前外在信号。通常需要 10-60 秒。</p></div><ErrorBox error={error} />{error && <button onClick={() => setPage(3)} className="rounded-2xl bg-black px-5 py-4 font-semibold text-white">返回检查配置</button>}</div>}
 
         {page === 5 && <div className="space-y-5"><ReportView report={report || fallbackReport} /><div className="rounded-3xl bg-white p-5 shadow-sm"><h3 className="font-semibold">你觉得这份报告像在说你吗？</h3><div className="mt-4 flex gap-2">{[1,2,3,4,5].map((score) => <button key={score} onClick={() => setFeedback(score)} className={`flex h-11 w-11 items-center justify-center rounded-2xl border ${feedback >= score ? "border-black bg-black text-white" : "border-zinc-200 bg-white text-zinc-400"}`}><Star size={18} fill={feedback >= score ? "currentColor" : "none"} /></button>)}</div></div><div className="rounded-3xl bg-white p-5 shadow-sm"><h3 className="font-semibold">哪里不像你？哪里有用？</h3><textarea value={note} onChange={(e) => setNote(e.target.value)} className="mt-4 min-h-28 w-full rounded-2xl border border-zinc-200 bg-white p-4 text-sm outline-none focus:border-black" placeholder="比如：目标对象判断准，但发型建议不现实；或者报告还是太像模板……" /></div><button onClick={resetAll} className="flex w-full items-center justify-center gap-2 rounded-2xl bg-black px-5 py-4 font-semibold text-white">重新测试 <Send size={18} /></button></div>}
       </main>
     </div>
+    </ErrorBoundary>
   );
 }

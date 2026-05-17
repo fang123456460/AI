@@ -35,12 +35,12 @@ function safeParseReport(text) {
   }
 }
 
-async function callVisionAPI({ baseUrl, apiKey, model, messages }) {
+async function callVisionAPI({ baseUrl, apiKey, model, messages, maxTokensOverride, temperatureOverride }) {
   const payload = {
     model,
     messages,
-    temperature: 0.18,
-    max_tokens: Number(process.env.AI_MAX_TOKENS || 2600),
+    temperature: temperatureOverride ?? 0.18,
+    max_tokens: Number(maxTokensOverride || process.env.AI_MAX_TOKENS || 2600),
   };
 
   const controller = new AbortController();
@@ -64,6 +64,57 @@ async function callVisionAPI({ baseUrl, apiKey, model, messages }) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+
+function buildPhotoValidationPrompt(profile) {
+  const gender = String(profile?.gender || "未填写");
+  return `
+你是照片准入审核器，只判断用户上传的图片是否适合用于「AI约会吸引力诊断」。
+你的任务不是生成报告，不要给穿搭或恋爱建议，只做图片有效性判断。
+
+用户填写性别：${gender}
+
+有效照片标准：
+1. 必须是真人照片，能看到真实人物本人，不是商品图、服装平铺图、电商产品图、广告图、模特商品图、风景图、宠物图、截图、表情包、动漫图。
+2. 正脸/半身/全身三张图中，至少需要 2 张明确包含同一个真人主体；其中至少 1 张能看到脸部或头部轮廓，至少 1 张能看到上半身或全身穿着轮廓。
+3. 如果图片里只有衣服、鞋、包、配饰、商品包装、家居物品、背景场景，不合格。
+4. 如果人物太小、太模糊、被遮挡严重，无法分析形象，也不合格。
+5. 不要因为照片质量普通就拒绝；只要是真人且能分析形象，可以通过。
+
+请只返回 JSON，不要 Markdown：
+{
+  "isValid": true/false,
+  "reason": "一句话说明为什么通过或拒绝",
+  "photoStatus": [
+    {"index": 1, "type": "front", "hasRealPerson": true/false, "hasFaceOrHead": true/false, "hasOutfit": true/false, "problem": "如果无问题写空字符串"},
+    {"index": 2, "type": "half", "hasRealPerson": true/false, "hasFaceOrHead": true/false, "hasOutfit": true/false, "problem": "如果无问题写空字符串"},
+    {"index": 3, "type": "full", "hasRealPerson": true/false, "hasFaceOrHead": true/false, "hasOutfit": true/false, "problem": "如果无问题写空字符串"}
+  ],
+  "userMessage": "给用户看的中文提示，说明需要重新上传什么照片"
+}
+`;
+}
+
+async function validateUserPhotos({ baseUrl, apiKey, model, profile, photos }) {
+  const content = [
+    { type: "text", text: buildPhotoValidationPrompt(profile) },
+    ...photos.map((photo) => ({ type: "image_url", image_url: { url: photo.dataUrl, detail: "low" } })),
+  ];
+  const messages = [
+    { role: "system", content: "你是严格的照片准入审核器。只判断图片是否是真人形象诊断可用照片。遇到电商商品图、服装平铺图、物品图必须拒绝。只返回 JSON。" },
+    { role: "user", content },
+  ];
+  const data = await callVisionAPI({ baseUrl, apiKey, model, messages, maxTokensOverride: 700, temperatureOverride: 0.05 });
+  const text = data?.choices?.[0]?.message?.content || "";
+  const result = safeParseReport(text);
+  return {
+    isValid: result?.isValid === true,
+    reason: String(result?.reason || "照片不符合真人形象诊断要求。"),
+    userMessage: String(result?.userMessage || result?.reason || "请上传本人正脸、半身、全身照片，不要上传商品图或物品图。"),
+    photoStatus: Array.isArray(result?.photoStatus) ? result.photoStatus : [],
+    raw: result,
+  };
 }
 
 function buildPrompt(profile) {
@@ -185,17 +236,28 @@ app.post("/api/generate-report", async (req, res) => {
     .slice(0, Number(process.env.AI_PHOTO_LIMIT || 3));
   if (validPhotos.length < 1) return res.status(400).json({ error: "没有收到有效图片。" });
 
-  const content = [
-    { type: "text", text: buildPrompt(profile) },
-    ...validPhotos.map((photo) => ({ type: "image_url", image_url: { url: photo.dataUrl, detail: "low" } })),
-  ];
-
-  const messages = [
-    { role: "system", content: "你是约会形象教练和社交吸引力分析师。你不是普通穿搭顾问。必须基于照片事实和目标对象做差异化分析，拒绝模板化。只返回 JSON。" },
-    { role: "user", content },
-  ];
-
   try {
+    console.log(`[local-api] validating photos with ${model}, photos=${validPhotos.length}`);
+    const validation = await validateUserPhotos({ baseUrl, apiKey, model, profile, photos: validPhotos });
+    if (!validation.isValid) {
+      console.log("[local-api] invalid photos:", validation.reason);
+      return res.status(422).json({
+        error: validation.userMessage,
+        code: "INVALID_USER_PHOTOS",
+        validation,
+      });
+    }
+
+    const content = [
+      { type: "text", text: buildPrompt(profile) },
+      ...validPhotos.map((photo) => ({ type: "image_url", image_url: { url: photo.dataUrl, detail: "low" } })),
+    ];
+
+    const messages = [
+      { role: "system", content: "你是约会形象教练和社交吸引力分析师。你不是普通穿搭顾问。必须基于照片事实和目标对象做差异化分析，拒绝模板化。只返回 JSON。" },
+      { role: "user", content },
+    ];
+
     console.log(`[local-api] attraction report with ${model}, photos=${validPhotos.length}`);
     const startedAt = Date.now();
     const data = await callVisionAPI({ baseUrl, apiKey, model, messages });
