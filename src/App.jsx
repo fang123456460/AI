@@ -328,6 +328,119 @@ function ReportView({ report }) {
   );
 }
 
+const reportKeyTitles = {
+  scores: "评分",
+  attraction: "恋爱感指数",
+  match: "目标匹配度",
+  clarity: "形象清晰度",
+  keyword: "核心信号",
+  snapshot: "照片事实",
+  visibleFacts: "能确认看到",
+  uncertain: "无法准确判断",
+  currentSignal: "当前释放的约会信号",
+  summary: "总结",
+  easyToAttract: "容易吸引的人",
+  weakWith: "较难吸引的人",
+  targetMatch: "目标对象匹配",
+  targetLabel: "目标对象",
+  matchLevel: "匹配程度",
+  gap: "主要差距",
+  route: "主路线",
+  name: "路线名称",
+  keywords: "关键词",
+  keep: "保留",
+  remove: "去掉",
+  avoid: "避开",
+  priority: "最该先改的 3 个吸引力信号",
+  signal: "信号",
+  evidence: "依据",
+  action: "动作",
+  why: "为什么有效",
+  actionPlan: "发型/穿搭/细节怎么改",
+  hair: "发型",
+  outfit: "穿搭",
+  detail: "细节",
+  dontDo: "不要做",
+  dateFormula: "社交场景可执行公式",
+  mainLook: "主形象",
+  formula: "公式",
+  plan7: "7天吸引力调整计划",
+  conclusion: "总结",
+};
+
+function safeStringifyReport(value) {
+  const seen = new WeakSet();
+  return JSON.stringify(
+    value,
+    (key, val) => {
+      if (typeof val === "object" && val !== null) {
+        if (seen.has(val)) return "[Circular]";
+        seen.add(val);
+      }
+      return val;
+    },
+    2
+  );
+}
+
+function formatReportValue(value, level = 0, key = "") {
+  if (value === null || value === undefined || value === "") return "";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    return value
+      .map((item, index) => {
+        const text = formatReportValue(item, level + 1, key);
+        if (!text) return "";
+        const prefix = key === "plan7" ? `${index + 1}. ` : "- ";
+        return `${prefix}${text.replace(/\n/g, "\n  ")}`;
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+  if (typeof value === "object") {
+    return Object.entries(value)
+      .map(([childKey, childValue]) => {
+        const text = formatReportValue(childValue, level + 1, childKey);
+        if (!text) return "";
+        const title = reportKeyTitles[childKey] || childKey;
+        if (typeof childValue === "object") return `${title}：\n${text}`;
+        return `${title}：${text}`;
+      })
+      .filter(Boolean)
+      .join("\n\n");
+  }
+  return String(value);
+}
+
+function buildSafeReportText(report) {
+  try {
+    if (typeof report === "string") return report;
+    if (report?.rawText) return String(report.rawText);
+    const text = formatReportValue(report || fallbackReport);
+    return text || safeStringifyReport(report || fallbackReport);
+  } catch (error) {
+    return `报告已经生成，但展示格式异常。\n\n错误：${String(error?.message || error)}\n\n原始数据：\n${safeStringifyReport(report || {})}`;
+  }
+}
+
+function ReportShell({ report }) {
+  const displayText = React.useMemo(() => buildSafeReportText(report || fallbackReport), [report]);
+  return (
+    <div className="space-y-5">
+      <div className="rounded-[32px] bg-white p-6 shadow-sm">
+        <div className="mb-5 flex items-center justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-black">AI约会吸引力诊断报告</h2>
+            <p className="mt-2 text-sm text-zinc-500">当前为稳定展示模式：先保证报告一定能显示，不再因为 AI 返回格式变化导致白屏。</p>
+          </div>
+          <div className="rounded-full bg-black px-3 py-1 text-xs text-white">V0.5.3</div>
+        </div>
+        <pre className="whitespace-pre-wrap break-words rounded-3xl bg-zinc-50 p-4 text-sm leading-7 text-zinc-800">{displayText}</pre>
+      </div>
+    </div>
+  );
+}
+
 export default function AIDateAttractionCoachApp() {
   const [page, setPage] = useState(0);
   const [profile, setProfile] = useState({ nickname: "", gender: "男", age: "23-28岁", city: "", temperature: "", socialGoal: "提升异性吸引力", targetType: "暂时不知道，让AI判断", changeLevel: "中度调整：可以换发型/换部分衣服", context: "普通日常" });
@@ -382,7 +495,7 @@ export default function AIDateAttractionCoachApp() {
 
         {page === 0 && <div className="space-y-5">
           <div className="overflow-hidden rounded-[32px] bg-black p-6 text-white shadow-xl">
-            <div className="mb-8 flex items-center justify-between"><div className="flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs"><Heart size={14} /> AI约会吸引力顾问</div><div className="rounded-full bg-white/10 px-3 py-1 text-xs">V0.5</div></div>
+            <div className="mb-8 flex items-center justify-between"><div className="flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs"><Heart size={14} /> AI约会吸引力顾问</div><div className="rounded-full bg-white/10 px-3 py-1 text-xs">V0.5.3</div></div>
             <h1 className="text-4xl font-black leading-tight tracking-tight">你现在会吸引谁？又该怎么吸引你想吸引的人？</h1>
             <p className="mt-4 text-sm leading-7 text-zinc-300">上传真人照片，AI 分析你当前释放的约会信号、目标对象匹配度，以及发型/穿搭/细节该怎么调整。不是穿搭顾问，是恋爱形象教练。</p>
             <button onClick={() => setPage(1)} className="mt-8 flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-5 py-4 font-semibold text-black">开始吸引力诊断 <ChevronRight size={18} /></button>
@@ -408,7 +521,7 @@ export default function AIDateAttractionCoachApp() {
 
         {page === 4 && <div className="space-y-5 py-12 text-center"><div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-black text-white"><Loader2 className="animate-spin" size={34} /></div><div><h2 className="text-2xl font-black">正在生成吸引力报告</h2><p className="mt-3 text-sm leading-7 text-zinc-500">AI 正在分析照片、目标对象和当前外在信号。通常需要 10-60 秒。</p></div><ErrorBox error={error} />{error && <button onClick={() => setPage(3)} className="rounded-2xl bg-black px-5 py-4 font-semibold text-white">返回检查配置</button>}</div>}
 
-        {page === 5 && <div className="space-y-5"><ReportView report={report || fallbackReport} /><div className="rounded-3xl bg-white p-5 shadow-sm"><h3 className="font-semibold">你觉得这份报告像在说你吗？</h3><div className="mt-4 flex gap-2">{[1,2,3,4,5].map((score) => <button key={score} onClick={() => setFeedback(score)} className={`flex h-11 w-11 items-center justify-center rounded-2xl border ${feedback >= score ? "border-black bg-black text-white" : "border-zinc-200 bg-white text-zinc-400"}`}><Star size={18} fill={feedback >= score ? "currentColor" : "none"} /></button>)}</div></div><div className="rounded-3xl bg-white p-5 shadow-sm"><h3 className="font-semibold">哪里不像你？哪里有用？</h3><textarea value={note} onChange={(e) => setNote(e.target.value)} className="mt-4 min-h-28 w-full rounded-2xl border border-zinc-200 bg-white p-4 text-sm outline-none focus:border-black" placeholder="比如：目标对象判断准，但发型建议不现实；或者报告还是太像模板……" /></div><button onClick={resetAll} className="flex w-full items-center justify-center gap-2 rounded-2xl bg-black px-5 py-4 font-semibold text-white">重新测试 <Send size={18} /></button></div>}
+        {page === 5 && <div className="space-y-5"><ReportShell report={report || fallbackReport} /><div className="rounded-3xl bg-white p-5 shadow-sm"><h3 className="font-semibold">你觉得这份报告像在说你吗？</h3><div className="mt-4 flex gap-2">{[1,2,3,4,5].map((score) => <button key={score} onClick={() => setFeedback(score)} className={`flex h-11 w-11 items-center justify-center rounded-2xl border ${feedback >= score ? "border-black bg-black text-white" : "border-zinc-200 bg-white text-zinc-400"}`}><Star size={18} fill={feedback >= score ? "currentColor" : "none"} /></button>)}</div></div><div className="rounded-3xl bg-white p-5 shadow-sm"><h3 className="font-semibold">哪里不像你？哪里有用？</h3><textarea value={note} onChange={(e) => setNote(e.target.value)} className="mt-4 min-h-28 w-full rounded-2xl border border-zinc-200 bg-white p-4 text-sm outline-none focus:border-black" placeholder="比如：目标对象判断准，但发型建议不现实；或者报告还是太像模板……" /></div><button onClick={resetAll} className="flex w-full items-center justify-center gap-2 rounded-2xl bg-black px-5 py-4 font-semibold text-white">重新测试 <Send size={18} /></button></div>}
       </main>
     </div>
     </ErrorBoundary>
